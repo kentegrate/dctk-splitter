@@ -1,0 +1,1 @@
+python splitter.py --parallel --metadata /large/takaki/JSL/RecordTheseHands/server/collector/metadata_dump.json --input /large/takaki/JSL/RecordTheseHands/server/collector/video_dump/upload/ --output /large/takaki/JSL/RecordTheseHands/server/collector/clip_dump_new2
