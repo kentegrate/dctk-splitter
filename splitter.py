@@ -63,12 +63,30 @@ def create_output_path(dest_dir: str, clip: Clip) -> str:
     return os.path.join(dest_dir, new_filename)
 
 
+def check_clips_exist(dest_dir: str, clips: List[Clip]) -> bool:
+    """
+    Check if any clips from this file have already been processed.
+    Returns True if clips exist (should skip), False if should process.
+    Same logic as clip_video.py: if any clip exists, skip the entire file.
+    """
+    for clip in clips:
+        output_path = create_output_path(dest_dir, clip)
+        if os.path.exists(output_path):
+            return True
+    return False
+
+
 def process_one_file(args_tuple):
     """
     Process a single video file by writing frames directly to clip files,
     avoiding buffering frames in memory.
     """
-    src_dir, dest_dir, file_name, clips = args_tuple
+    src_dir, dest_dir, file_name, clips, skip_existing = args_tuple
+
+    # Check if clips already exist (same logic as clip_video.py)
+    if skip_existing and check_clips_exist(dest_dir, clips):
+        print(f"Skipping existing clips for: {file_name}. Skipping processing the whole mp4 file.")
+        return True
 
     userId = clips[0].summary.userId
     path = os.path.join(src_dir, userId, "upload", file_name)
@@ -152,15 +170,33 @@ def process_one_file(args_tuple):
     return True
 
 
-def process_files_parallel(src_dir: str, dest_dir: str, by_file: Dict, max_workers: int = None):
+def process_files_parallel(src_dir: str, dest_dir: str, by_file: Dict, max_workers: int = None, skip_existing: bool = True):
     """Process multiple files in parallel"""
     if max_workers is None:
         max_workers = min(mp.cpu_count(), len(by_file))
 
-    # Prepare arguments for each file
+    # Filter out files that should be skipped
+    files_to_process = {}
+    skipped_files = []
+    
+    for file_name, clips in by_file.items():
+        if skip_existing and check_clips_exist(dest_dir, clips):
+            skipped_files.append(file_name)
+            print(f"Skipping existing clips for: {file_name}")
+        else:
+            files_to_process[file_name] = clips
+    
+    if skipped_files:
+        print(f"Skipped {len(skipped_files)} files with existing clips")
+    
+    if not files_to_process:
+        print("No files to process - all clips already exist")
+        return
+
+    # Prepare arguments for each file to process
     file_args = [
-        (src_dir, dest_dir, file_name, clips)
-        for file_name, clips in by_file.items()
+        (src_dir, dest_dir, file_name, clips, skip_existing)
+        for file_name, clips in files_to_process.items()
     ]
 
     print(f"Processing {len(file_args)} files with {max_workers} workers")
@@ -196,12 +232,12 @@ def main(args):
             print(f"  {file_name}: {len(clips)} clips")
 
         if args.parallel and len(by_file) > 1:
-            process_files_parallel(args.input, args.output, by_file, args.workers)
+            process_files_parallel(args.input, args.output, by_file, args.workers, not args.no_skip)
         else:
             for file_name, clips in by_file.items():
                 print(f"\nProcessing {file_name}...")
                 try:
-                    success = process_one_file((args.input, args.output, file_name, clips))
+                    success = process_one_file((args.input, args.output, file_name, clips, not args.no_skip))
                     if not success:
                         print(f"Failed to process {file_name}")
                 except KeyboardInterrupt:
@@ -233,7 +269,7 @@ if __name__ == "__main__":
     p.add_argument("--workers", type=int, default=2, help="Number of worker processes")
     p.add_argument("--user", type=str, default=None, help="Filter by user id")
     p.add_argument("--session", type=str, default=None, help="Filter by session id")
-    # --write-workers argument is no longer needed
+    p.add_argument("--no-skip", action="store_true", help="Don't skip existing clips (process all files)")
     
     args = p.parse_args()
     main(args)
